@@ -173,4 +173,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-/data
+/data/cremad/AudioWAV
+/data/cremad/Image-01-FPS
