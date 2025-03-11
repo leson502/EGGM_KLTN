@@ -21,7 +21,7 @@ class CramedDataset(Dataset):
         self.audio = []
         self.label = []
         self.train = train
-        self.audio_length = 256
+        self.audio_length = 1024
         self.fps = 1
 
         class_dict = {'NEU':0, 'HAP':1, 'SAD':2, 'FEA':3, 'DIS':4, 'ANG':5}
@@ -49,10 +49,14 @@ class CramedDataset(Dataset):
         # audio
 
         waveform, sr = torchaudio.load(self.audio[idx])
-        fbank = torchaudio.compliance.kaldi.fbank(
-                waveform, htk_compat=True, sample_frequency=sr, use_energy=False,
-                window_type='hanning', num_mel_bins=128, dither=0.0, frame_shift=10)
 
+        waveform = waveform - waveform.mean()
+        norm_mean = -4.503877
+        norm_std = 5.141276
+
+        fbank = torchaudio.compliance.kaldi.fbank(waveform, htk_compat=True, sample_frequency=sr, use_energy=False,
+                                                            window_type='hanning', num_mel_bins=128, dither=0.0, frame_shift=10)
+        
         n_frames = fbank.shape[0]
         
         p = self.audio_length - n_frames
@@ -61,9 +65,10 @@ class CramedDataset(Dataset):
             fbank = m(fbank)
         elif p < 0:
             fbank = fbank[0:self.audio_length, :]
+        fbank = (fbank - norm_mean) / (norm_std * 2)
 
         fbank = fbank.unsqueeze(0)
-#         print(fbank.shape)
+        # print(fbank.shape)
         if self.train:
             transform = transforms.Compose([
                 transforms.RandomResizedCrop(224),
