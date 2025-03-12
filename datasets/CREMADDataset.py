@@ -58,7 +58,7 @@ class CramedDataset(Dataset):
         # spectrogram = librosa.stft(resamples, n_fft=512, hop_length=353)
         # spectrogram = np.log(np.abs(spectrogram) + 1e-7)
         # spectrogram = torch.tensor(spectrogram, dtype=torch.float32).unsqueeze(0)
-        fbank = torch.load(self.audio[idx])
+        fbank = torch.load(self.audio[idx], weights_only=False)
         
         # print(fbank.shape)
         if self.train:
