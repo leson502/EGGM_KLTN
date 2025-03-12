@@ -22,16 +22,18 @@ class CramedDataset(Dataset):
         self.audio = []
         self.label = []
         self.train = train
-        self.audio_length = 1024
+        self.audio_length = 256
         self.fps = 1
 
         class_dict = {'NEU':0, 'HAP':1, 'SAD':2, 'FEA':3, 'DIS':4, 'ANG':5}
 
         self.visual_feature_path = visual_path
         self.audio_feature_path = audio_path
+        
 
         for item in data:
-            audio_path = os.path.join(self.audio_feature_path, item[0] + '.wav')
+            audio_path = os.path.join(self.audio_feature_path, item[0] + '.pt')
+            print(audio_path)
             visual_path = os.path.join(self.visual_feature_path, 'Image-{:02d}-FPS'.format(self.fps), item[0])
 
             if os.path.exists(audio_path) and os.path.exists(visual_path):
@@ -48,35 +50,16 @@ class CramedDataset(Dataset):
     def __getitem__(self, idx):
 
         # audio
-        samples, rate = librosa.load(self.audio[idx], sr=22050)
-        resamples = np.tile(samples, 3)[:22050*3]
-        resamples[resamples > 1.] = 1.
-        resamples[resamples < -1.] = -1.
+        # samples, rate = librosa.load(self.audio[idx], sr=22050)
+        # resamples = np.tile(samples, 3)[:22050*3]
+        # resamples[resamples > 1.] = 1.
+        # resamples[resamples < -1.] = -1.
 
-        spectrogram = librosa.stft(resamples, n_fft=512, hop_length=353)
-        spectrogram = np.log(np.abs(spectrogram) + 1e-7)
-        spectrogram = torch.tensor(spectrogram, dtype=torch.float32).unsqueeze(0)
-
-        # waveform, sr = torchaudio.load(self.audio[idx])
-
-        # waveform = waveform - waveform.mean()
-        # norm_mean = -4.503877
-        # norm_std = 5.141276
-
-        # fbank = torchaudio.compliance.kaldi.fbank(waveform, htk_compat=True, sample_frequency=sr, use_energy=False,
-        #                                                     window_type='hanning', num_mel_bins=128, dither=0.0, frame_shift=10)
+        # spectrogram = librosa.stft(resamples, n_fft=512, hop_length=353)
+        # spectrogram = np.log(np.abs(spectrogram) + 1e-7)
+        # spectrogram = torch.tensor(spectrogram, dtype=torch.float32).unsqueeze(0)
+        fbank = torch.load(self.audio[idx])
         
-        # n_frames = fbank.shape[0]
-        
-        # p = self.audio_length - n_frames
-        # if p > 0:
-        #     m = torch.nn.ZeroPad2d((0, 0, 0, p))
-        #     fbank = m(fbank)
-        # elif p < 0:
-        #     fbank = fbank[0:self.audio_length, :]
-        # fbank = (fbank - norm_mean) / (norm_std * 2)
-
-        # fbank = fbank.unsqueeze(0)
         # print(fbank.shape)
         if self.train:
             transform = transforms.Compose([
@@ -103,7 +86,7 @@ class CramedDataset(Dataset):
         # label
         label = self.label[idx]
 
-        return spectrogram, img, label
+        return fbank, img, label
 
 def load_cremad(root):
     
@@ -115,7 +98,7 @@ def load_cremad(root):
     train_df = pd.read_csv(train_csv, header=None)
     test = pd.read_csv(test_csv, header=None)
 
-    audio_path = os.path.join(root, 'cremad/AudioWAV')
+    audio_path = os.path.join(root, 'cremad/fbank')
     visual_path = os.path.join(root, 'cremad')
     train_dataset = CramedDataset(audio_path,  visual_path, train_df.to_numpy(), True)
     test_dataset = CramedDataset(audio_path,  visual_path, test.to_numpy(), False)

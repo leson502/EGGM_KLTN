@@ -1,3 +1,4 @@
+import comet_ml
 import torch
 from torch import nn
 import torch.optim as optim
@@ -7,6 +8,9 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.cremad import CREMADModel, ClassifierGuided
 from src.eval_metrics import eval_crema, cal_cos
 from tqdm import tqdm
+from tensorboardX import SummaryWriter
+
+steps = 0
 
 def initiate(hyp_params, train_loader, test_loader):
     model = CREMADModel()
@@ -26,8 +30,9 @@ def initiate(hyp_params, train_loader, test_loader):
     
     criterion = getattr(nn, hyp_params.criterion)()
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=hyp_params.when, factor=0.1, verbose=True)
+    writer = SummaryWriter(comment='CREMAD', comet_config={'project_name': 'CREMAD', "disabled": False})
     settings = {'model': model, 'optimizer': optimizer, 'criterion': criterion, 'scheduler': scheduler,
-                'classifier': classifier, 'cls_optimizer': cls_optimizer}
+                'classifier': classifier, 'cls_optimizer': cls_optimizer, 'writer': writer}
     return train_model(settings, hyp_params, train_loader, test_loader)
 
 
@@ -38,8 +43,10 @@ def train_model(settings, hyp_params, train_loader, test_loader):
     scheduler = settings['scheduler']
     classifier = settings['classifier']
     cls_optimizer = settings['cls_optimizer']
+    writer = settings['writer']
     acc1 = [0] * hyp_params.num_mod
     l_gm = None
+    
 
     def train(model, classifier, optimizer, cls_optimizer, criterion):
         nonlocal acc1, l_gm
@@ -48,6 +55,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
         num_batches = hyp_params.n_train // hyp_params.batch_size
         proc_loss, proc_size = 0, 0
         start_time = time.time()
+        global steps
         for batch in tqdm(train_loader):
             audio, vision, batch_Y = batch
             eval_attr = batch_Y.squeeze(-1)  # if num of labels is 1
@@ -80,9 +88,12 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                 
                 cls_loss = criterion(cls_res[0], eval_attr)
                 for i in range(1, hyp_params.num_mod):
-                    cls_loss += criterion(cls_res[i], eval_attr)
-    
-                (cls_loss + gum_loss).backward()
+                    uni_cls_loss = criterion(cls_res[i], eval_attr)
+                    cls_loss += uni_cls_loss
+                    writer.add_scalar(f'loss/cls_{i}', uni_cls_loss.item(), steps)
+
+                cls_loss = cls_loss/hyp_params.num_mod +  gum_loss
+                cls_loss.backward()
 
                 cls_optimizer.step()
 
@@ -96,6 +107,9 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                 
                 acc2 = classifier.cal_coeff(eval_attr, cls_res)
                 diff = [acc2[i] - acc1[i] for i in range(hyp_params.num_mod)]
+
+                for i in range(hyp_params.num_mod):
+                    writer.add_scalar(f'acc/cls_{i}', acc2[i], steps)
 
                 diff_sum = sum(diff) + 1e-8
                 coeff = list()
@@ -111,6 +125,8 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                     for name, params in net.named_parameters():
                         if f'encoders.{i}' in name:
                             params.grad *= (coeff[i] * hyp_params.rou)
+                
+                steps += 1
                 
                 
 
