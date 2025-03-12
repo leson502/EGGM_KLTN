@@ -271,13 +271,17 @@ class ClassifierGuided(nn.Module):
         super(ClassifierGuided, self).__init__()
         # Classifiers
         self.num_mod = num_mod
-        self.init_classifier(Classifier(512, 6))
-    
-    def init_classifier(self, cls):
         self.classifers = nn.ModuleList([
-            deepcopy(cls)
+            Classifier(512, 6)
             for _ in range(self.num_mod)
         ])
+    
+    def init_classifier(self, cls):
+        for i in range(self.num_mod):
+            with torch.no_grad():
+                for param_A, param_B in zip(self.classifers[i].parameters(), cls.parameters()):
+                    param_A.data.copy_(param_B.data)
+
 
     def cal_coeff(self, y, cls_res):
         acc_list = list()

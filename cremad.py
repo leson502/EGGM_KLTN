@@ -66,6 +66,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             raw_loss = criterion(preds, eval_attr) + g_loss
             if hyp_params.modulation == 'cggm' and l_gm is not None:
                 raw_loss += hyp_params.lamda * l_gm
+                # print('l_gm:', l_gm)
             raw_loss.backward()
             
             if hyp_params.modulation == 'cggm':
@@ -83,11 +84,13 @@ def train_model(settings, hyp_params, train_loader, test_loader):
     
                 (cls_loss + gum_loss).backward()
 
+                cls_optimizer.step()
+
                 cls_grad = []
                 for name, para in net2.named_parameters():
                     if 'out_layer.weight' in name:
-                        cls_grad.append(para)
-                
+                        cls_grad.append(para)                
+
                 
                 llist = cal_cos(cls_grad, fusion_grad)
                 
@@ -109,7 +112,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                         if f'encoders.{i}' in name:
                             params.grad *= (coeff[i] * hyp_params.rou)
                 
-                cls_optimizer.step()
+                
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), hyp_params.clip)
             optimizer.step()
