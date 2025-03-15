@@ -1,8 +1,11 @@
 import torch
 import torchaudio
+from torchaudio.transforms import MFCC
 import glob
 import os
 from tqdm import tqdm
+
+
 def preprocess_audio(audio_path, audio_length=256):
     waveform, sr = torchaudio.load(audio_path)
 
@@ -25,14 +28,19 @@ def preprocess_audio(audio_path, audio_length=256):
 
     fbank = fbank.unsqueeze(0)
 
-    return fbank
+    return fbank, n_frames
 
 if __name__ == '__main__':
     audio_paths = glob.glob('AudioWAV/*.wav')
     # print(audio_paths)
     os.makedirs('fbank', exist_ok=True)
+    n_flist = []
     for audio_path in tqdm(audio_paths):
-        fbank = preprocess_audio(audio_path)
+        fbank, n_frames = preprocess_audio(audio_path)
         audio_name = os.path.basename(audio_path)[:-4]
         torch.save(fbank, f'fbank/{audio_name}.pt')
+        n_flist.append(n_frames)
+    
+    with open('n_frames.txt', 'w') as f:
+        f.write(str(n_flist))
     
