@@ -117,74 +117,68 @@ class MLP(nn.Module):
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
         self.relu = nn.ReLU()
-        self.soft = nn.Softmax(1)
 
     def forward(self, x):
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
-        out = self.soft(out)
         return out
 
-
-class MoE(nn.Module):
-
-    """Call a Sparsely gated mixture of experts layer with 1-layer Feed-Forward networks as experts.
-    Args:
-    input_size: integer - size of the input
-    output_size: integer - size of the input
-    num_experts: an integer - number of experts
-    hidden_size: an integer - hidden size of the experts
-    noisy_gating: a boolean
-    k: an integer - how many experts to use for each batch element
-    """
-
-    def __init__(self, input_size, output_size, num_experts, hidden_size, noisy_gating=True, k=4):
-        super(MoE, self).__init__()
+class Gate(nn.Module):
+    def __init__(self, input_size, num_experts, noisy_gating=True, k=2):
+        super(Gate, self).__init__()
         self.noisy_gating = noisy_gating
         self.num_experts = num_experts
-        self.output_size = output_size
-        self.input_size = input_size
-        self.hidden_size = hidden_size
         self.k = k
-        # instantiate experts
-        self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for i in range(self.num_experts)])
+
         self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
         self.w_noise = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
 
         self.softplus = nn.Softplus()
-        self.softmax = nn.Softmax(1)
+        self.output_function = nn.Sigmoid()
+        # self.output_function = nn.Softmax(dim=1)
+        
+
         self.register_buffer("mean", torch.tensor([0.0]))
         self.register_buffer("std", torch.tensor([1.0]))
         assert(self.k <= self.num_experts)
-
-    def cv_squared(self, x):
-        """The squared coefficient of variation of a sample.
-        Useful as a loss to encourage a positive distribution to be more uniform.
-        Epsilons added for numerical stability.
-        Returns 0 for an empty Tensor.
-        Args:
-        x: a `Tensor`.
-        Returns:
-        a `Scalar`.
+    
+    def noisy_top_k_gating(self, x, train, noise_epsilon=1e-2):
+        """Noisy top-k gating.
+          See paper: https://arxiv.org/abs/1701.06538.
+          Args:
+            x: input Tensor with shape [batch_size, input_size]
+            train: a boolean - we only add noise at training time.
+            noise_epsilon: a float
+          Returns:
+            gates: a Tensor with shape [batch_size, num_experts]
+            load: a Tensor with shape [num_experts]
         """
-        eps = 1e-10
-        # if only num_experts = 1
+        clean_logits = x @ self.w_gate
+        if self.noisy_gating and train:
+            raw_noise_stddev = x @ self.w_noise
+            noise_stddev = ((self.softplus(raw_noise_stddev) + noise_epsilon))
+            noisy_logits = clean_logits + (torch.randn_like(clean_logits) * noise_stddev)
+            logits = noisy_logits
+        else:
+            logits = clean_logits
 
-        if x.shape[0] == 1:
-            return torch.tensor([0], device=x.device, dtype=x.dtype)
-        return x.float().var() / (x.float().mean()**2 + eps)
+        # calculate topk + 1 that will be needed for the noisy gates
+        logits = self.output_function(logits)
+        top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=1)
+        top_k_logits = top_logits[:, :self.k]
+        top_k_indices = top_indices[:, :self.k]
+        top_k_gates = top_k_logits / (top_k_logits.sum(1, keepdim=True) + 1e-6)  # normalization
 
-    def _gates_to_load(self, gates):
-        """Compute the true load per expert, given the gates.
-        The load is the number of examples for which the corresponding gate is >0.
-        Args:
-        gates: a `Tensor` of shape [batch_size, n]
-        Returns:
-        a float32 `Tensor` of shape [n]
-        """
-        return (gates > 0).sum(0)
+        zeros = torch.zeros_like(logits, requires_grad=True)
+        gates = zeros.scatter(1, top_k_indices, top_k_gates)
 
+        if self.noisy_gating and self.k < self.num_experts and train:
+            load = (self._prob_in_top_k(clean_logits, noisy_logits, noise_stddev, top_logits)).sum(0)
+        else:
+            load = self._gates_to_load(gates)
+        return gates, load
+    
     def _prob_in_top_k(self, clean_values, noisy_values, noise_stddev, noisy_top_values):
         """Helper function to NoisyTopKGating.
         Computes the probability that value is in top k, given different random noise.
@@ -217,44 +211,46 @@ class MoE(nn.Module):
         prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev)
         prob = torch.where(is_in, prob_if_in, prob_if_out)
         return prob
-
-    def noisy_top_k_gating(self, x, train, noise_epsilon=1e-2):
-        """Noisy top-k gating.
-          See paper: https://arxiv.org/abs/1701.06538.
-          Args:
-            x: input Tensor with shape [batch_size, input_size]
-            train: a boolean - we only add noise at training time.
-            noise_epsilon: a float
-          Returns:
-            gates: a Tensor with shape [batch_size, num_experts]
-            load: a Tensor with shape [num_experts]
+    
+    def _gates_to_load(self, gates):
+        """Compute the true load per expert, given the gates.
+        The load is the number of examples for which the corresponding gate is >0.
+        Args:
+        gates: a `Tensor` of shape [batch_size, n]
+        Returns:
+        a float32 `Tensor` of shape [n]
         """
-        clean_logits = x @ self.w_gate
-        if self.noisy_gating and train:
-            raw_noise_stddev = x @ self.w_noise
-            noise_stddev = ((self.softplus(raw_noise_stddev) + noise_epsilon))
-            noisy_logits = clean_logits + (torch.randn_like(clean_logits) * noise_stddev)
-            logits = noisy_logits
-        else:
-            logits = clean_logits
+        return (gates > 0).sum(0)
 
-        # calculate topk + 1 that will be needed for the noisy gates
-        logits = self.softmax(logits)
-        top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=1)
-        top_k_logits = top_logits[:, :self.k]
-        top_k_indices = top_indices[:, :self.k]
-        top_k_gates = top_k_logits / (top_k_logits.sum(1, keepdim=True) + 1e-6)  # normalization
-
-        zeros = torch.zeros_like(logits, requires_grad=True)
-        gates = zeros.scatter(1, top_k_indices, top_k_gates)
-
-        if self.noisy_gating and self.k < self.num_experts and train:
-            load = (self._prob_in_top_k(clean_logits, noisy_logits, noise_stddev, top_logits)).sum(0)
-        else:
-            load = self._gates_to_load(gates)
+    def forward(self, x, modality):
+        gates, load = self.noisy_top_k_gating(x, self.training)
         return gates, load
 
-    def forward(self, x, loss_coef=1e-2):
+
+class MoE(nn.Module):
+
+    """Call a Sparsely gated mixture of experts layer with 1-layer Feed-Forward networks as experts.
+    Args:
+    input_size: integer - size of the input
+    output_size: integer - size of the input
+    num_experts: an integer - number of experts
+    hidden_size: an integer - hidden size of the experts
+    noisy_gating: a boolean
+    k: an integer - how many experts to use for each batch element
+    """
+
+    def __init__(self, input_size, output_size, num_experts, hidden_size, noisy_gating=True):
+        super(MoE, self).__init__()
+        self.noisy_gating = noisy_gating
+        self.num_experts = num_experts
+        self.output_size = output_size
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        # instantiate experts
+        self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for i in range(self.num_experts)])
+
+
+    def forward(self, x, gates, loss_coef=1e-2):
         """Args:
         x: tensor shape [batch_size, input_size]
         train: a boolean scalar.
@@ -266,16 +262,10 @@ class MoE(nn.Module):
         training loss of the model.  The backpropagation of this loss
         encourages all experts to be approximately equally used across a batch.
         """
-        gates, load = self.noisy_top_k_gating(x, self.training)
         # calculate importance loss
-        importance = gates.sum(0)
-        #
-        loss = self.cv_squared(importance) + self.cv_squared(load)
-        loss *= loss_coef
-
         dispatcher = SparseDispatcher(self.num_experts, gates)
         expert_inputs = dispatcher.dispatch(x)
         gates = dispatcher.expert_to_gates()
         expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]
         y = dispatcher.combine(expert_outputs)
-        return y, loss
+        return y

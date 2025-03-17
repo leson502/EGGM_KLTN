@@ -87,12 +87,12 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                         fusion_grad = para
                 
                 cls_loss = criterion(cls_res[0], eval_attr)
-                for i in range(1, hyp_params.num_mod):
+                for i in range(0, hyp_params.num_mod):
                     uni_cls_loss = criterion(cls_res[i], eval_attr)
                     cls_loss += uni_cls_loss
                     writer.add_scalar(f'loss/cls_{i}', uni_cls_loss.item(), steps)
 
-                cls_loss = cls_loss/hyp_params.num_mod +  gum_loss
+                cls_loss = cls_loss / hyp_params.num_mod + gum_loss
                 cls_loss.backward()
 
                 cls_optimizer.step()
@@ -136,6 +136,10 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             proc_loss += raw_loss.item() * batch_size
             proc_size += batch_size
             epoch_loss += raw_loss.item() * batch_size
+
+            writer.add_scalar('loss/train', raw_loss.item() / batch_size, steps)
+            
+        writer.add_scalar('loss/train_epoch', epoch_loss / hyp_params.n_train, steps)
 
         return epoch_loss / hyp_params.n_train
 
@@ -188,4 +192,9 @@ def train_model(settings, hyp_params, train_loader, test_loader):
         if best_acc < acc:
             best_acc = acc
 
+        writer.add_scalar('loss/valid', val_loss, steps)
+        writer.add_scalar('acc/valid', acc, steps)
+
+    writer.add_scalar('acc/best', best_acc, steps)
+    writer.close()
     print("Accuracy: ", best_acc)

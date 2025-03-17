@@ -33,7 +33,6 @@ class CramedDataset(Dataset):
 
         for item in data:
             audio_path = os.path.join(self.audio_feature_path, item[0] + '.pt')
-            print(audio_path)
             visual_path = os.path.join(self.visual_feature_path, 'Image-{:02d}-FPS'.format(self.fps), item[0])
 
             if os.path.exists(audio_path) and os.path.exists(visual_path):
