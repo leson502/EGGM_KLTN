@@ -227,6 +227,7 @@ class CREMADModel(nn.Module):
         self.visual_net = resnet18(modality='visual')
         
         self.classifier = Classifier(512, self.n_classes)
+        self.loss_coef = 1e-2
 
     def forward(self, audio, visual):
 
@@ -243,18 +244,40 @@ class CREMADModel(nn.Module):
 
         a = torch.flatten(a, 1)
         v = torch.flatten(v, 1)
-        out_a, lossg_a = self.classifier(a, 0)
-        out_v, lossg_v = self.classifier(v, 1)
-        
+        out_a, gates_a, load_a = self.classifier(a, 0)
+        out_v, gates_v, load_v = self.classifier(v, 1)
+
+        gates = torch.cat([gates_a, gates_v], dim=1)
+        load = load_a + load_v
+
+        importance = gates.sum(0)
+        #
+        loss = cv_squared(importance) + cv_squared(load)
+        loss *= self.loss_coef
         hs = [a.clone().detach(), v.clone().detach()]
         out = out_a + out_v
 
-        return out, hs, lossg_a + lossg_v
+        return out, hs, loss
 
+def cv_squared(x):
+    """The squared coefficient of variation of a sample.
+    Useful as a loss to encourage a positive distribution to be more uniform.
+    Epsilons added for numerical stability.
+    Returns 0 for an empty Tensor.
+    Args:
+    x: a `Tensor`.
+    Returns:
+    a `Scalar`.
+    """
+    eps = 1e-10
+    # if only num_experts = 1
 
+    if x.shape[0] == 1:
+        return torch.tensor([0], device=x.device, dtype=x.dtype)
+    return x.float().var() / (x.float().mean()**2 + eps)
 
 class Classifier(nn.Module):
-    def __init__(self, in_dim, out_dim, num_expert=16, num_mod=2, k=12, loss_coef=1e-2):
+    def __init__(self, in_dim, out_dim, num_expert=16, num_mod=2, k=12):
         super(Classifier, self).__init__()
 
         self.in_dim = in_dim
@@ -262,40 +285,18 @@ class Classifier(nn.Module):
         self.num_expert = num_expert
         self.num_mod = num_mod
         self.k = k
-        self.loss_coef = loss_coef
 
         self.moe = MoE(in_dim, in_dim, num_expert, in_dim // 4, True)
         self.gatting_network = nn.ModuleList(Gate(in_dim, num_expert, k=k) for _ in range(num_mod))
         self.out_layer = nn.Linear(in_dim, out_dim)
     
-    def cv_squared(self, x):
-        """The squared coefficient of variation of a sample.
-        Useful as a loss to encourage a positive distribution to be more uniform.
-        Epsilons added for numerical stability.
-        Returns 0 for an empty Tensor.
-        Args:
-        x: a `Tensor`.
-        Returns:
-        a `Scalar`.
-        """
-        eps = 1e-10
-        # if only num_experts = 1
-
-        if x.shape[0] == 1:
-            return torch.tensor([0], device=x.device, dtype=x.dtype)
-        return x.float().var() / (x.float().mean()**2 + eps)
-    
     def forward(self, x, modality):
         gates, load = self.gatting_network[modality](x, modality)
-        importance = gates.sum(0)
-        #
-        loss = self.cv_squared(importance) + self.cv_squared(load)
-        loss *= self.loss_coef
-
+        
         out = self.moe(x, gates)
         x = F.relu(out) + x
         x = self.out_layer(x)
-        return x, loss
+        return x, gates, load
 
 
 class ClassifierGuided(nn.Module):
@@ -327,10 +328,9 @@ class ClassifierGuided(nn.Module):
         self.cls_res = list()
         gatting = 0
         for i in range(len(x)):
-            out, loss = self.classifers[i](x[i], i)
+            out, _, _ = self.classifers[i](x[i], i)
             self.cls_res.append(out)
-            gatting += loss
-        return self.cls_res, gatting
+        return self.cls_res
 
 
 if __name__ == "__main__":

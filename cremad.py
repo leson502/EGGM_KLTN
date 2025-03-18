@@ -30,10 +30,12 @@ def initiate(hyp_params, train_loader, test_loader):
     
     criterion = getattr(nn, hyp_params.criterion)()
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=hyp_params.when, factor=0.1, verbose=True)
-    writer = SummaryWriter(comment='CREMAD', comet_config={'project_name': 'CREMAD', "disabled": False})
+    writer = SummaryWriter(comment='CREMAD', comet_config={'project_name': 'CREMAD', "disabled": True})
     settings = {'model': model, 'optimizer': optimizer, 'criterion': criterion, 'scheduler': scheduler,
                 'classifier': classifier, 'cls_optimizer': cls_optimizer, 'writer': writer}
     return train_model(settings, hyp_params, train_loader, test_loader)
+
+
 
 
 def train_model(settings, hyp_params, train_loader, test_loader):
@@ -56,6 +58,14 @@ def train_model(settings, hyp_params, train_loader, test_loader):
         proc_loss, proc_size = 0, 0
         start_time = time.time()
         global steps
+        gate_list = {i: [] for i in range(hyp_params.num_mod)}
+
+        def getting_gate(module, input, output):
+                inp, x = input
+                gates, load = output
+                select = (gates > 0).long().sum(0)
+                gate_list[x].append(select)
+
         for batch in tqdm(train_loader):
             audio, vision, batch_Y = batch
             eval_attr = batch_Y.squeeze(-1)  # if num of labels is 1
@@ -67,9 +77,16 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                     audio, vision, eval_attr = audio.cuda(), vision.cuda(), eval_attr.cuda()
                     eval_attr = eval_attr.long()
 
+            handles = []
+            for module in model.classifier.gatting_network:
+                handles.append(module.register_forward_hook(getting_gate))
+            
             batch_size = audio.size(0)
             net = nn.DataParallel(model) if batch_size > 10 else model
             preds, hs, g_loss = net(audio, vision)
+
+            for handle in handles:
+                handle.remove()
    
             raw_loss = criterion(preds, eval_attr) + g_loss
             if hyp_params.modulation == 'cggm' and l_gm is not None:
@@ -80,7 +97,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             if hyp_params.modulation == 'cggm':
                 cls_optimizer.zero_grad()
                 net2 = nn.DataParallel(classifier) if batch_size > 10 else classifier
-                cls_res, gum_loss = net2(hs)
+                cls_res = net2(hs)
 
                 for name, para in net.named_parameters():
                     if 'out_layer.weight' in name:
@@ -92,7 +109,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                     cls_loss += uni_cls_loss
                     writer.add_scalar(f'loss/cls_{i}', uni_cls_loss.item(), steps)
 
-                cls_loss = cls_loss / hyp_params.num_mod + gum_loss
+                cls_loss = cls_loss / hyp_params.num_mod
                 cls_loss.backward()
 
                 cls_optimizer.step()
@@ -127,8 +144,8 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                             params.grad *= (coeff[i] * hyp_params.rou)
                 
                 steps += 1
-                
-                
+            
+
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), hyp_params.clip)
             optimizer.step()
@@ -138,7 +155,12 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             epoch_loss += raw_loss.item() * batch_size
 
             writer.add_scalar('loss/train', raw_loss.item() / batch_size, steps)
-            
+        
+        for i in range(hyp_params.num_mod):
+                gate_list[i] = torch.cat(gate_list[i], dim=0).sum().item()
+                # add bar plot for gate_list
+                writer.add_scalar(f'gate/cls_{i}', gate_list[i], steps)
+
         writer.add_scalar('loss/train_epoch', epoch_loss / hyp_params.n_train, steps)
 
         return epoch_loss / hyp_params.n_train
