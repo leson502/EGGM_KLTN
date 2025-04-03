@@ -250,7 +250,7 @@ class MoE(nn.Module):
         self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for i in range(self.num_experts)])
 
 
-    def forward(self, x, gates, loss_coef=1e-2):
+    def forward(self, x, gates):
         """Args:
         x: tensor shape [batch_size, input_size]
         train: a boolean scalar.

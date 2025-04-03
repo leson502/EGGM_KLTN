@@ -5,7 +5,7 @@ import torch.optim as optim
 import numpy as np
 import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from models.cremad import CREMADModel, ClassifierGuided
+from models.cremad import CREMADModel, ClassifierGuided, cv_squared
 from src.eval_metrics import eval_crema, cal_cos
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
@@ -83,15 +83,25 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             
             batch_size = audio.size(0)
             net = nn.DataParallel(model) if batch_size > 10 else model
-            preds, hs, g_loss = net(audio, vision)
+            preds, hs, gate_load = net(audio, vision)
 
             for handle in handles:
                 handle.remove()
    
-            raw_loss = criterion(preds, eval_attr) + g_loss
+            raw_loss = criterion(preds, eval_attr) 
             if hyp_params.modulation == 'cggm' and l_gm is not None:
                 raw_loss += hyp_params.lamda * l_gm
+                for i in range(hyp_params.num_mod):
+                    gate_load[i][0] = gate_load[i][0] * coeff[i]
+                    gate_load[i][1] = gate_load[i][1] * coeff[i]
+
+                    
                 # print('l_gm:', l_gm)
+            gate = torch.cat(gate_load[0], dim=1)
+            load = sum(gate_load[1])
+
+            router_loss = cv_squared(gate) + cv_squared(load)
+            raw_loss += router_loss
             raw_loss.backward()
             
             if hyp_params.modulation == 'cggm':

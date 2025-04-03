@@ -227,7 +227,6 @@ class CREMADModel(nn.Module):
         self.visual_net = resnet18(modality='visual')
         
         self.classifier = Classifier(512, self.n_classes)
-        self.loss_coef = 1e-2
 
     def forward(self, audio, visual):
 
@@ -247,17 +246,13 @@ class CREMADModel(nn.Module):
         out_a, gates_a, load_a = self.classifier(a, 0)
         out_v, gates_v, load_v = self.classifier(v, 1)
 
-        gates = torch.cat([gates_a, gates_v], dim=1)
-        load = load_a + load_v
-
-        importance = gates.sum(0)
-        #
-        loss = cv_squared(importance) + cv_squared(load)
-        loss *= self.loss_coef
+        gates = [gates_a, gates_v]
+        load = [load_a, load_v]
+     
         hs = [a.clone().detach(), v.clone().detach()]
         out = out_a + out_v
 
-        return out, hs, loss
+        return out, hs, [gates, load]
 
 def cv_squared(x):
     """The squared coefficient of variation of a sample.
