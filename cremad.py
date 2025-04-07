@@ -48,10 +48,11 @@ def train_model(settings, hyp_params, train_loader, test_loader):
     writer = settings['writer']
     acc1 = [0] * hyp_params.num_mod
     l_gm = None
+    coeff = None
     
 
     def train(model, classifier, optimizer, cls_optimizer, criterion):
-        nonlocal acc1, l_gm
+        nonlocal acc1, l_gm, coeff
         epoch_loss = 0
         model.train()
         num_batches = hyp_params.n_train // hyp_params.batch_size
@@ -89,11 +90,13 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                 handle.remove()
    
             raw_loss = criterion(preds, eval_attr) 
-            if hyp_params.modulation == 'cggm' and l_gm is not None:
-                raw_loss += hyp_params.lamda * l_gm
-                for i in range(hyp_params.num_mod):
-                    gate_load[i][0] = gate_load[i][0] * coeff[i]
-                    gate_load[i][1] = gate_load[i][1] * coeff[i]
+            if hyp_params.modulation == 'cggm':
+                if l_gm is not None:
+                    raw_loss += hyp_params.lamda * l_gm
+                if coeff is not None:
+                    for i in range(hyp_params.num_mod):
+                        gate_load[i][0] = gate_load[i][0] / coeff[i]
+                        gate_load[i][1] = gate_load[i][1] / coeff[i]
 
                     
                 # print('l_gm:', l_gm)
@@ -193,8 +196,9 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                         audio, vision, eval_attr = audio.cuda(), vision.cuda(), eval_attr.cuda()
 
                 net = model
-                preds, _, g_loss = net(audio, vision)
-                total_loss += (criterion(preds, eval_attr) + g_loss).item() 
+                preds, _, _ = net(audio, vision)
+
+                total_loss += (criterion(preds, eval_attr)).item() 
                 results.append(preds)
                 truths.append(eval_attr)
 
