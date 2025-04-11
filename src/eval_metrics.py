@@ -72,14 +72,13 @@ def train_eval_food(results, truths):
     acc = accuracy_score(test_truth_i, test_preds_i)
     return acc
 
-def eval_food(results, truths):
-    test_preds = results.view(-1, 101).cpu().detach().numpy()
-    test_truth = truths.view(-1).cpu().detach().numpy()
+def eval_food(golds, preds):
+    golds = golds.cpu().detach().numpy()
+    preds = preds.cpu().detach().numpy()
 
-    test_preds_i = np.argmax(test_preds, axis=1)
-    test_truth_i = test_truth
-    f1 = f1_score(test_truth_i, test_preds_i, average='weighted')
-    acc = accuracy_score(test_truth_i, test_preds_i)
+    preds = np.argmax(preds, axis=1)
+
+    acc = accuracy_score(golds, preds)
     return acc
 
 

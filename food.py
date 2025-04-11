@@ -1,11 +1,11 @@
-import comet_ml
+# import comet_ml
 import torch
 from torch import nn
 import torch.optim as optim
 import numpy as np
 import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from models.cremad import CREMADModel, ClassifierGuided
+from models.foodmodel import FoodModel, ClassifierGuided
 from models.moe import cv_squared
 from src.eval_metrics import eval_crema, cal_cos
 from tqdm import tqdm
@@ -14,10 +14,10 @@ from tensorboardX import SummaryWriter
 steps = 0
 
 def initiate(hyp_params, train_loader, test_loader):
-    model = CREMADModel()
+    model = FoodModel()
 
     if hyp_params.modulation != 'none':
-        classifier = ClassifierGuided(2, 512)
+        classifier = ClassifierGuided(2, 768)
         cls_optimizer = getattr(optim, hyp_params.optim)(classifier.parameters(), lr=hyp_params.cls_lr)
     else:
         classifier, cls_optimizer = None, None
@@ -69,27 +69,26 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                 gate_list[x].append(select)
 
         for batch in tqdm(train_loader):
-            audio, vision, batch_Y = batch
+            visual, text, batch_Y = batch
             eval_attr = batch_Y.squeeze(-1)  # if num of labels is 1
             model.zero_grad()
             classifier.init_classifier(model.classifier)
 
             if hyp_params.use_cuda:
                 with torch.cuda.device(0):
-                    audio, vision, eval_attr = audio.cuda(), vision.cuda(), eval_attr.cuda()
+                    visual, text, eval_attr = visual.cuda(), text.cuda(), eval_attr.cuda()
                     eval_attr = eval_attr.long()
 
             handles = []
             for module in model.classifier.gatting_network:
                 handles.append(module.register_forward_hook(getting_gate))
             
-            batch_size = audio.size(0)
+            batch_size = visual.size(0)
             net = nn.DataParallel(model) if batch_size > 10 else model
-            preds, hs, gate_load = net(audio, vision)
+            preds, hs, gate_load = net(visual, text)
 
             for handle in handles:
                 handle.remove()
-   
             raw_loss = criterion(preds, eval_attr) 
             if hyp_params.modulation == 'cggm':
                 if l_gm is not None:

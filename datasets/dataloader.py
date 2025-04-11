@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 
 from datasets.CMUDataset import CMUData
 from datasets.IEMODataset import IEMOData
-from datasets.FOODDataset import Food101
+from datasets.FOODDataset import FoodDataset
 from datasets.BratsDataset import BraTSData
 from datasets.CREMADDataset import load_cremad
 
@@ -45,15 +45,15 @@ def getdataloader(dataset, batch_size, data_path):
         }
     elif dataset == 'food':
         data = {
-            'train': Food101(mode='train', dataset_root_dir=data_path),
-            'valid': Food101(mode='test', dataset_root_dir=data_path),
-            'test': Food101(mode='test', dataset_root_dir=data_path),
+            'train': FoodDataset("data/food/features/", "data/food/texts/train_titles.csv"),
+            'test': FoodDataset("data/food/features/", "data/food/texts/test_titles.csv"),
         }
         orig_dim = None
         dataLoader = {
             ds: DataLoader(data[ds],
                            batch_size=batch_size,
-                           num_workers=8)
+                           num_workers=8, 
+                           shuffle=True if ds == 'train' else False)
             for ds in data.keys()
         }
     elif dataset == 'brats':
@@ -72,8 +72,8 @@ def getdataloader(dataset, batch_size, data_path):
     elif dataset == "cremad":
         train_dataset, test_dataset = load_cremad('data/')
         dataLoader = {
-            'train': DataLoader(train_dataset, batch_size=batch_size),
-            'test': DataLoader(test_dataset, batch_size=batch_size)
+            'train': DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8),
+            'test': DataLoader(test_dataset, batch_size=batch_size, num_workers=8)
         }
         orig_dim = None
     return dataLoader, orig_dim
