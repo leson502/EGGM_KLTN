@@ -100,8 +100,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                         gate_load[i][1] = gate_load[i][1] / coeff[i]
 
                     
-                # print('l_gm:', l_gm)
-            gate = torch.cat(gate_load[0], dim=1)
+            gate = sum(gate_load[0])
             load = sum(gate_load[1])
 
             router_loss = cv_squared(gate) + cv_squared(load)
@@ -154,7 +153,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
                 for i in range(hyp_params.num_mod):
                     for name, params in net.named_parameters():
-                        if f'encoders.{i}' in name:
+                        if f'encoder_{i}' in name:
                             params.grad *= (coeff[i] * hyp_params.rou)
                 
                 steps += 1

@@ -223,15 +223,15 @@ class CREMADModel(nn.Module):
 
         self.n_classes = 6
         
-        self.audio_net = resnet18(modality='audio')
-        self.visual_net = resnet18(modality='visual')
+        self.encoder_0 = resnet18(modality='audio')
+        self.encoder_1 = resnet18(modality='visual')
         
         self.classifier = Classifier(512, self.n_classes)
 
     def forward(self, audio, visual):
 
-        a = self.audio_net(audio)
-        v = self.visual_net(visual)
+        a = self.encoder_0(audio)
+        v = self.encoder_1(visual)
 
         (_, C, H, W) = v.size()
         B = a.size()[0]

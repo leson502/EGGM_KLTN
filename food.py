@@ -100,7 +100,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
                     
                 # print('l_gm:', l_gm)
-            gate = torch.cat(gate_load[0], dim=1)
+            gate = sum(gate_load[0])
             load = sum(gate_load[1])
 
             router_loss = cv_squared(gate) + cv_squared(load)

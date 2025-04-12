@@ -45,8 +45,8 @@ def getdataloader(dataset, batch_size, data_path):
         }
     elif dataset == 'food':
         data = {
-            'train': FoodDataset("data/food/features/", "data/food/texts/train_titles.csv"),
-            'test': FoodDataset("data/food/features/", "data/food/texts/test_titles.csv"),
+            'train': FoodDataset("data/food/", "data/food/texts/train_titles.csv", "google-bert/bert-base-uncased", "google/vit-base-patch16-224"),
+            'test': FoodDataset("data/food/", "data/food/texts/test_titles.csv", "google-bert/bert-base-uncased", "google/vit-base-patch16-224"),
         }
         orig_dim = None
         dataLoader = {

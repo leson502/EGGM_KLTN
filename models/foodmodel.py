@@ -4,55 +4,33 @@ from modules.transformer import TransformerEncoder
 import torch.nn.functional as F
 from .moe import MoE, Gate
 from src.eval_metrics import eval_food
+from transformers import BertTokenizer, BertModel
+from transformers import ViTModel, ViTFeatureExtractor
 
 class FoodModel(nn.Module):
-    def __init__(self, output_dim=101, num_heads=8, layers=4,
-                 relu_dropout=0.1, embed_dropout=0.3, res_dropout=0.1, out_dropout=0.1,
-                 attn_dropout=0.25):
+    def __init__(self, output_dim=101):
         super(FoodModel, self).__init__()
         self.num_mod = 2
         self.proj_dim = 768
-        self.num_heads = num_heads
-        self.layers = layers
-        self.attn_dropout = attn_dropout
-        self.relu_dropout = relu_dropout
-        self.res_dropout = res_dropout
-        self.out_dropout = out_dropout
-        self.embed_dropout = embed_dropout
-        self.projv = nn.Linear(768, self.proj_dim)
-        self.projt = nn.Linear(768, self.proj_dim)
-
-        layer = nn.TransformerEncoderLayer(
-            d_model=self.proj_dim, nhead=self.num_heads, dim_feedforward=self.proj_dim * 4,
-            dropout=self.attn_dropout
-        )
-
-        self.vision_encoder = nn.TransformerEncoder(
-            layer, num_layers=self.layers
-        )
-
-        self.text_encoder = nn.TransformerEncoder(
-            layer, num_layers=self.layers
-        )
-
+       
+        self.encoder_0 = ViTModel.from_pretrained("google/vit-base-patch16-224")
+        self.encoder_1 = BertModel.from_pretrained("google-bert/bert-base-uncased")
         # Output layers
         self.classifier = Classifier(self.proj_dim, output_dim, num_expert=16, num_mod=self.num_mod, k=12)
 
     def forward(self, v, t):
-        v_rep = self.projv(v)
-        t_rep = self.projt(t)
-        v_rep = self.vision_encoder(v_rep)
-        t_rep = self.text_encoder(t_rep)
+        v = self.encoder_0(v).pooler_output
+        t = self.encoder_1(t).pooler_output
 
-        out_v, gates_v, load_v = self.classifier(v_rep, 0)
-        out_t, gates_t, load_t = self.classifier(t_rep, 1)
-        
+        out_v, gates_v, load_v = self.classifier(v, 0)
+        out_t, gates_t, load_t = self.classifier(t, 1)
+    
         out = out_t + out_v
 
         gates = [gates_v, gates_t]
         load = [load_v, load_t]
 
-        hs = [v_rep.clone().detach(), t_rep.clone().detach()]
+        hs = [v.clone().detach(), t.clone().detach()]
         
         return out, hs, [gates, load]
 
