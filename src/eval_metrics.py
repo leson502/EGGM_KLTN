@@ -63,16 +63,7 @@ def train_eval_iemo(results, truths):
     return acc
 
 
-def train_eval_food(results, truths):
-    test_preds = results.view(-1, 101).cpu().detach().numpy()
-    test_truth = truths.view(-1).cpu().detach().numpy()
-
-    test_preds_i = np.argmax(test_preds, axis=1)
-    test_truth_i = test_truth
-    acc = accuracy_score(test_truth_i, test_preds_i)
-    return acc
-
-def eval_food(golds, preds):
+def train_eval_food(golds, preds):
     golds = golds.cpu().detach().numpy()
     preds = preds.cpu().detach().numpy()
 
@@ -80,6 +71,16 @@ def eval_food(golds, preds):
 
     acc = accuracy_score(golds, preds)
     return acc
+
+def eval_cls(golds, preds):
+    golds = golds.cpu().detach().numpy()
+    preds = preds.cpu().detach().numpy()
+
+    preds = np.argmax(preds, axis=1)
+
+    acc = accuracy_score(golds, preds)
+    f1 = f1_score(golds, preds, average='weighted')
+    return acc, f1
 
 
 def eval_iemocap(results, truths):

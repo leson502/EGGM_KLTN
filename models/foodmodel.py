@@ -3,7 +3,7 @@ import torch.nn as nn
 from modules.transformer import TransformerEncoder
 import torch.nn.functional as F
 from .moe import MoE, Gate
-from src.eval_metrics import eval_food
+from src.eval_metrics import train_eval_food
 from transformers import BertTokenizer, BertModel
 from transformers import ViTModel, ViTFeatureExtractor
 
@@ -16,7 +16,7 @@ class FoodModel(nn.Module):
         self.encoder_0 = ViTModel.from_pretrained("google/vit-base-patch16-224")
         self.encoder_1 = BertModel.from_pretrained("google-bert/bert-base-uncased")
         # Output layers
-        self.classifier = Classifier(self.proj_dim, output_dim, num_expert=16, num_mod=self.num_mod, k=12)
+        self.classifier = Classifier(self.proj_dim, output_dim, num_expert=16, num_mod=self.num_mod, k=4)
 
     def forward(self, v, t):
         v = self.encoder_0(v).pooler_output
@@ -79,7 +79,7 @@ class ClassifierGuided(nn.Module):
     def cal_coeff(self, y, cls_res):
         acc_list = list()
         for i in range(self.num_mod):
-            acc = eval_food(y, cls_res[i])
+            acc = train_eval_food(y, cls_res[i])
             acc_list.append(acc)
 
         return acc_list

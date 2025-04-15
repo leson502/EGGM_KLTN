@@ -41,7 +41,7 @@ def cremadrun():
 
 
     # Tuning
-    parser.add_argument('--batch_size', type=int, default=64, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=128, metavar='N',
                         help='batch size')
     parser.add_argument('--clip', type=float, default=0.8,
                         help='gradient clip value')
@@ -55,6 +55,7 @@ def cremadrun():
                         help='when to decay learning rate')
     parser.add_argument('--rou', type=float, default=1.3)
     parser.add_argument('--lamda', type=float, default=0.2)
+    parser.add_argument('--beta', type=float, default=0.01)
 
 
     # Logistics

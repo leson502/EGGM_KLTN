@@ -1,11 +1,11 @@
 from torch.utils.data import DataLoader
-
+from torch.utils.data.sampler import SubsetRandomSampler
 from datasets.CMUDataset import CMUData
 from datasets.IEMODataset import IEMOData
 from datasets.FOODDataset import FoodDataset
 from datasets.BratsDataset import BraTSData
 from datasets.CREMADDataset import load_cremad
-
+from datasets.MoseiDataset import CMUMOSIDataset
 class opt:
     cvNo = 1
     A_type = "comparE"
@@ -76,6 +76,33 @@ def getdataloader(dataset, batch_size, data_path):
             'test': DataLoader(test_dataset, batch_size=batch_size, num_workers=8)
         }
         orig_dim = None
+    elif dataset == "mosei":
+        dataset = CMUMOSIDataset("data/mosei/CMUMOSEI_features_raw_2way.pkl", 
+                                 "data/mosei/features/wav2vec-large-c-UTT", 
+                                 "data/mosei/features/deberta-large-4-UTT", 
+                                 "data/mosei/features/manet_UTT")
+        trainNum = len(dataset.trainVids)
+        valNum = len(dataset.valVids)
+        testNum = len(dataset.testVids)
+        train_idxs = list(range(0, trainNum))
+        val_idxs = list(range(trainNum, trainNum+valNum))
+        test_idxs = list(range(trainNum+valNum, trainNum+valNum+testNum))
+            
+        train_sampler = SubsetRandomSampler(train_idxs)
+        val_sampler = SubsetRandomSampler(val_idxs)
+        test_sampler = SubsetRandomSampler(test_idxs)
+
+        train_loader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=dataset.collate_fn)
+        val_loader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler, collate_fn=dataset.collate_fn)
+        test_loader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=dataset.collate_fn)
+
+        dataLoader = {
+            'train': train_loader,
+            'valid': val_loader,
+            'test': test_loader
+        }
+        orig_dim = [512, 1024, 1024]
+
     return dataLoader, orig_dim
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import random
 import torch
 import argparse
-from food import *
+from mosei import *
 from datasets.dataloader import getdataloader
 
 import numpy as np
@@ -55,7 +55,7 @@ def cremadrun():
                         help='when to decay learning rate')
     parser.add_argument('--rou', type=float, default=1.3)
     parser.add_argument('--lamda', type=float, default=0.2)
-    parser.add_argument('--beta', type=float, default=0.01)
+    parser.add_argument('--beta', type=float, default=0.001)
 
 
     # Logistics
@@ -67,7 +67,7 @@ def cremadrun():
                         help='do not use cuda')
     args = parser.parse_args()
 
-    dataset = 'food'
+    dataset = 'mosei'
 
 
     def setup_seed(seed):
@@ -101,7 +101,7 @@ def cremadrun():
     hyp_params.n_train, hyp_params.n_test = len(train_loader),  len(test_loader)
     hyp_params.output_dim = 4
     hyp_params.criterion = 'CrossEntropyLoss'
-    hyp_params.num_mod = 2
+    hyp_params.num_mod = 3
     test_loss = initiate(hyp_params, train_loader, test_loader)
 
 

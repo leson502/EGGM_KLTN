@@ -6,7 +6,7 @@ import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.msamodel import ClassifierGuided
 from models.foodmodel import FoodModel
-from src.eval_metrics import eval_food, cal_cos
+from src.eval_metrics import eval_cls, cal_cos
 from transformers import ViTModel, BertModel
 
 
@@ -183,7 +183,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         start = time.time()
         train(model, classifier, optimizer, cls_optimizer, criterion, bert, vit)
         val_loss, r, t = evaluate(model, criterion, bert, vit, test=False)
-        acc = eval_food(r, t)
+        acc = eval_cls(r, t)
 
         end = time.time()
         duration = end - start

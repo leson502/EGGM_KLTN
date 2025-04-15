@@ -7,7 +7,7 @@ import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.foodmodel import FoodModel, ClassifierGuided
 from models.moe import cv_squared
-from src.eval_metrics import eval_crema, cal_cos
+from src.eval_metrics import eval_cls, cal_cos
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 
@@ -90,20 +90,22 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             for handle in handles:
                 handle.remove()
             raw_loss = criterion(preds, eval_attr) 
+            writer.add_scalar('loss/task', raw_loss.item(), steps)
             if hyp_params.modulation == 'cggm':
                 if l_gm is not None:
                     raw_loss += hyp_params.lamda * l_gm
                 if coeff is not None:
                     for i in range(hyp_params.num_mod):
-                        gate_load[i][0] = gate_load[i][0] / coeff[i]
-                        gate_load[i][1] = gate_load[i][1] / coeff[i]
+                        gate_load[0][i] = gate_load[0][i] / coeff[i]
+                        gate_load[1][i] = gate_load[1][i] / coeff[i]
 
                     
                 # print('l_gm:', l_gm)
             gate = sum(gate_load[0])
             load = sum(gate_load[1])
 
-            router_loss = cv_squared(gate) + cv_squared(load)
+            router_loss = hyp_params.beta * (cv_squared(gate) + cv_squared(load))
+            writer.add_scalar('loss/router', router_loss.item(), steps)
             raw_loss += router_loss
             raw_loss.backward()
             
@@ -116,10 +118,10 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                     if 'out_layer.weight' in name:
                         fusion_grad = para
                 
-                cls_loss = criterion(cls_res[0], eval_attr)
+                cls_loss = 0
                 for i in range(0, hyp_params.num_mod):
                     uni_cls_loss = criterion(cls_res[i], eval_attr)
-                    cls_loss += uni_cls_loss
+                    cls_loss = cls_loss + uni_cls_loss
                     writer.add_scalar(f'loss/cls_{i}', uni_cls_loss.item(), steps)
 
                 cls_loss = cls_loss / hyp_params.num_mod
@@ -136,16 +138,17 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                 llist = cal_cos(cls_grad, fusion_grad)
                 
                 acc2 = classifier.cal_coeff(eval_attr, cls_res)
-                diff = [acc2[i] - acc1[i] for i in range(hyp_params.num_mod)]
-
-                for i in range(hyp_params.num_mod):
-                    writer.add_scalar(f'acc/cls_{i}', acc2[i], steps)
+                diff = [max(acc2[i] - acc1[i], 0) for i in range(hyp_params.num_mod)]
 
                 diff_sum = sum(diff) + 1e-8
                 coeff = list()
 
                 for d in diff:
                     coeff.append((diff_sum - d) / diff_sum)
+
+                for i in range(hyp_params.num_mod):
+                    writer.add_scalar(f'acc/cls_{i}', acc2[i], steps)
+                    writer.add_scalar(f'coeff/cls_{i}', coeff[i], steps)
                 
                 acc1 = acc2
                 l_gm = np.sum(np.abs(coeff)) - (coeff[0] * llist[0] + coeff[1] * llist[1])
@@ -153,7 +156,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
                 for i in range(hyp_params.num_mod):
                     for name, params in net.named_parameters():
-                        if f'encoders.{i}' in name:
+                        if f'encoder_{i}' in name:
                             params.grad *= (coeff[i] * hyp_params.rou)
                 
                 steps += 1
@@ -169,10 +172,6 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
             writer.add_scalar('loss/train', raw_loss.item() / batch_size, steps)
         
-        for i in range(hyp_params.num_mod):
-                gate_list[i] = torch.cat(gate_list[i], dim=0).sum().item()
-                # add bar plot for gate_list
-                writer.add_scalar(f'gate/cls_{i}', gate_list[i], steps)
 
         writer.add_scalar('loss/train_epoch', epoch_loss / hyp_params.n_train, steps)
 
@@ -209,12 +208,13 @@ def train_model(settings, hyp_params, train_loader, test_loader):
         return avg_loss, results, truths
 
     best_acc = 0
+    best_f1 = 0
     for epoch in range(1, hyp_params.num_epochs + 1):
         start = time.time()
         train(model, classifier, optimizer, cls_optimizer, criterion)
         val_loss, val_res, val_truth = evaluate(model, criterion)
         
-        acc = eval_crema(val_truth, val_res)
+        acc, f1 = eval_cls(val_truth, val_res)
 
         end = time.time()
         duration = end - start
@@ -222,15 +222,19 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
         print("-" * 50)
         print(
-            'Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Acc {:5.4f}'.format(epoch, duration, val_loss, acc))
+            'Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Acc {:5.4f} | F1 {:5.4f}'.format(epoch, duration, val_loss, acc, f1))
         print("-" * 50)
 
-        if best_acc < acc:
+        if best_f1 < f1:
             best_acc = acc
+            best_f1 = f1
 
         writer.add_scalar('loss/valid', val_loss, steps)
         writer.add_scalar('acc/valid', acc, steps)
+        writer.add_scalar('f1/valid', f1, steps)
 
     writer.add_scalar('acc/best', best_acc, steps)
+    writer.add_scalar('f1/best', best_f1, steps)
     writer.close()
     print("Accuracy: ", best_acc)
+    print("F1: ", best_f1)
