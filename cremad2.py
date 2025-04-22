@@ -1,24 +1,24 @@
-# import comet_ml
+import comet_ml
 import torch
 from torch import nn
 import torch.optim as optim
 import numpy as np
 import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from models.msamodel import MSAModel, ClassifierGuided
+from models.cremadv2 import CREMADModel, ClassifierGuided
+from sklearn.metrics import confusion_matrix, classification_report
 from models.moe import cv_squared
 from src.eval_metrics import eval_cls, cal_cos
-from sklearn.metrics import confusion_matrix, classification_report
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
-from torch.nn.utils.rnn import unpad_sequence
+
 steps = 0
 
 def initiate(hyp_params, train_loader, test_loader):
-    model = MSAModel(2, hyp_params.orig_dim, 512, 4, 4)
-    
+    model = CREMADModel()
+
     if hyp_params.modulation != 'none':
-        classifier = ClassifierGuided(hyp_params.num_mod, 768)
+        classifier = ClassifierGuided(2, 768)
         cls_optimizer = getattr(optim, hyp_params.optim)(classifier.parameters(), lr=hyp_params.cls_lr)
     else:
         classifier, cls_optimizer = None, None
@@ -32,7 +32,7 @@ def initiate(hyp_params, train_loader, test_loader):
     
     criterion = getattr(nn, hyp_params.criterion)()
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=hyp_params.when, factor=0.1, verbose=True)
-    writer = SummaryWriter(comment='CREMAD', comet_config={'project_name': 'CREMAD', "disabled": False})
+    writer = SummaryWriter(comment='CREMAD', comet_config={'project_name': 'CREMAD', "disabled": True})
     settings = {'model': model, 'optimizer': optimizer, 'criterion': criterion, 'scheduler': scheduler,
                 'classifier': classifier, 'cls_optimizer': cls_optimizer, 'writer': writer}
     return train_model(settings, hyp_params, train_loader, test_loader)
@@ -70,15 +70,14 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                 gate_list[x].append(select)
 
         for batch in tqdm(train_loader):
-            audio, text, visual, batch_Y, lengths = batch
-            eval_attr = eval_attr = torch.concat(unpad_sequence(batch_Y, lengths, batch_first=True))
+            audio, vision, batch_Y = batch
+            eval_attr = batch_Y.squeeze(-1)  # if num of labels is 1
             model.zero_grad()
-            if hyp_params.modulation == 'cggm':
-                classifier.init_classifier(model.classifier)
+            classifier.init_classifier(model.classifier)
 
             if hyp_params.use_cuda:
                 with torch.cuda.device(0):
-                    input, eval_attr = [audio.cuda(), text.cuda(), visual.cuda()], eval_attr.cuda()
+                    audio, vision, eval_attr = audio.cuda(), vision.cuda(), eval_attr.cuda()
                     eval_attr = eval_attr.long()
 
             handles = []
@@ -87,12 +86,12 @@ def train_model(settings, hyp_params, train_loader, test_loader):
             
             batch_size = audio.size(0)
             net = nn.DataParallel(model) if batch_size > 10 else model
-            preds, hs, gate_load = net([input[i] for i in hyp_params.mod_id], lengths)
+            preds, hs, gate_load = net(audio, vision)
 
             for handle in handles:
                 handle.remove()
+   
             raw_loss = criterion(preds, eval_attr) 
-            writer.add_scalar('loss/task', raw_loss.item(), steps)
             if hyp_params.modulation == 'cggm':
                 if l_gm is not None:
                     raw_loss += hyp_params.lamda * l_gm
@@ -102,12 +101,10 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                         gate_load[1][i] = gate_load[1][i] / coeff[i]
 
                     
-                # print('l_gm:', l_gm)
             gate = sum(gate_load[0])
             load = sum(gate_load[1])
 
             router_loss = hyp_params.beta * (cv_squared(gate) + cv_squared(load))
-            writer.add_scalar('loss/router', router_loss.item(), steps)
             raw_loss += router_loss
             raw_loss.backward()
             
@@ -120,10 +117,10 @@ def train_model(settings, hyp_params, train_loader, test_loader):
                     if 'out_layer.weight' in name:
                         fusion_grad = para
                 
-                cls_loss = 0
+                cls_loss = criterion(cls_res[0], eval_attr)
                 for i in range(0, hyp_params.num_mod):
                     uni_cls_loss = criterion(cls_res[i], eval_attr)
-                    cls_loss = cls_loss + uni_cls_loss
+                    cls_loss += uni_cls_loss
                     writer.add_scalar(f'loss/cls_{i}', uni_cls_loss.item(), steps)
 
                 cls_loss = cls_loss / hyp_params.num_mod
@@ -138,24 +135,24 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
                 
                 llist = cal_cos(cls_grad, fusion_grad)
-
-                for i in range(hyp_params.num_mod):
-                    writer.add_scalar(f'cos/cls_{i}', llist[i], steps)
                 
                 acc2 = classifier.cal_coeff(eval_attr, cls_res)
                 diff = [max(acc2[i] - acc1[i], 0) for i in range(hyp_params.num_mod)]
+
 
                 diff_sum = sum(diff) + 1e-8
                 coeff = list()
 
                 for d in diff:
                     coeff.append((diff_sum - d) / diff_sum)
-
+                
                 for i in range(hyp_params.num_mod):
                     writer.add_scalar(f'acc/cls_{i}', acc2[i], steps)
                     writer.add_scalar(f'coeff/cls_{i}', coeff[i], steps)
                 
-                acc1 = acc2
+                for i in range(hyp_params.num_mod):
+                    acc1[i] = acc2[i]
+
                 l_gm = np.sum(np.abs(coeff)) - (coeff[0] * llist[0] + coeff[1] * llist[1])
                 l_gm /= hyp_params.num_mod
 
@@ -177,10 +174,14 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
             writer.add_scalar('loss/train', raw_loss.item() / batch_size, steps)
         
+        for i in range(hyp_params.num_mod):
+                gate_list[i] = torch.cat(gate_list[i], dim=0).sum().item()
+                # add bar plot for gate_list
+                writer.add_scalar(f'gate/cls_{i}', gate_list[i], steps)
 
         writer.add_scalar('loss/train_epoch', epoch_loss / hyp_params.n_train, steps)
 
-        return epoch_loss / hyp_params.n_train, gate_list
+        return epoch_loss / hyp_params.n_train
 
     def evaluate(model, criterion):
         model.eval()
@@ -189,19 +190,18 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
         results = []
         truths = []
+
         with torch.no_grad():
             for i_batch, batch in enumerate(loader):
-                audio, visual, text, batch_Y, lengths = batch
-                eval_attr = eval_attr = torch.concat(unpad_sequence(batch_Y, lengths, batch_first=True))
+                audio, vision, batch_Y = batch
+                eval_attr = batch_Y.squeeze(dim=-1)  # if num of labels is 1
 
                 if hyp_params.use_cuda:
                     with torch.cuda.device(0):
-                        input, eval_attr = [audio.cuda(), visual.cuda(), text.cuda()], eval_attr.cuda()
-                        eval_attr = eval_attr.long()
+                        audio, vision, eval_attr = audio.cuda(), vision.cuda(), eval_attr.cuda()
 
                 net = model
-                preds, _ , _ = net([input[i] for i in hyp_params.mod_id], lengths)
-
+                preds, _, _ = net(audio, vision)
 
                 total_loss += (criterion(preds, eval_attr)).item() 
                 results.append(preds)
@@ -211,23 +211,15 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
         results = torch.cat(results)
         truths = torch.cat(truths)
-        # for i in range(hyp_params.num_mod):
-        #     m_res[i] = torch.cat(m_res[i])
         return avg_loss, results, truths
 
     best_acc = 0
     best_f1 = 0
-    cfm = None
-    report = None
-    gate_total = {i: [] for i in range(hyp_params.num_mod)}
     for epoch in range(1, hyp_params.num_epochs + 1):
         start = time.time()
-        _, gate_list = train(model, classifier, optimizer, cls_optimizer, criterion)
-
-        for i in gate_list:
-            gate_list[i] = sum(gate_list[i])
-            gate_total[i].append(gate_list[i].cpu().numpy())
-        val_loss, val_res, val_truth = evaluate(model, criterion)    
+        train(model, classifier, optimizer, cls_optimizer, criterion)
+        val_loss, val_res, val_truth = evaluate(model, criterion)
+        
         acc, f1 = eval_cls(val_truth, val_res)
 
         end = time.time()
@@ -250,19 +242,13 @@ def train_model(settings, hyp_params, train_loader, test_loader):
 
         writer.add_scalar('loss/valid', val_loss, steps)
         writer.add_scalar('acc/valid', acc, steps)
-        writer.add_scalar('f1/valid', f1, steps)
 
     writer.add_scalar('acc/best', best_acc, steps)
     writer.add_scalar('f1/best', best_f1, steps)
+    writer.close()
     print("Accuracy: ", best_acc)
     print("F1: ", best_f1)
     print("Confusion Matrix: ")
     print(cfm)
     print("Classification Report: ")
     print(report)
-    import pickle
-    with open('gate_list.pkl', 'wb') as f:
-        pickle.dump(gate_total, f)
-    
-    writer.close()
-    

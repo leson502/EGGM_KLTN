@@ -6,6 +6,7 @@ import numpy as np
 import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.cremad import CREMADModel, ClassifierGuided
+from sklearn.metrics import confusion_matrix, classification_report
 from models.moe import cv_squared
 from src.eval_metrics import eval_cls, cal_cos
 from tqdm import tqdm
@@ -233,6 +234,11 @@ def train_model(settings, hyp_params, train_loader, test_loader):
         if best_f1 < f1:
             best_acc = acc
             best_f1 = f1
+            golds = val_truth.cpu().numpy()
+            preds = np.argmax(val_res.cpu().numpy(), axis=1)
+            
+            cfm = confusion_matrix(golds, preds)
+            report = classification_report(golds, preds, output_dict=True)
 
         writer.add_scalar('loss/valid', val_loss, steps)
         writer.add_scalar('acc/valid', acc, steps)
@@ -242,3 +248,7 @@ def train_model(settings, hyp_params, train_loader, test_loader):
     writer.close()
     print("Accuracy: ", best_acc)
     print("F1: ", best_f1)
+    print("Confusion Matrix: ")
+    print(cfm)
+    print("Classification Report: ")
+    print(report)

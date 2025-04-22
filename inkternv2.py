@@ -1,7 +1,7 @@
 import random
 import torch
 import argparse
-from mosei import *
+from cremad2 import *
 from datasets.dataloader import getdataloader
 
 import numpy as np
@@ -41,13 +41,13 @@ def cremadrun():
 
 
     # Tuning
-    parser.add_argument('--batch_size', type=int, default=64, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                         help='batch size')
     parser.add_argument('--clip', type=float, default=0.8,
                         help='gradient clip value')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=1e-5,
                         help='initial learning rate')
-    parser.add_argument('--cls_lr', type=float, default=5e-5,
+    parser.add_argument('--cls_lr', type=float, default=5e-6,
                         help='initial learning rate')
     parser.add_argument('--optim', type=str, default='Adam')
     parser.add_argument('--num_epochs', type=int, default=30)
@@ -55,11 +55,7 @@ def cremadrun():
                         help='when to decay learning rate')
     parser.add_argument('--rou', type=float, default=1.3)
     parser.add_argument('--lamda', type=float, default=0.2)
-    parser.add_argument('--beta', type=float, default=0.001)
-    parser.add_argument('--fusion', type=str, default='moe', choices=['moe', 'cat'])
-
-    parser.add_argument('--mod', type=str, default='atv')
-
+    parser.add_argument('--beta', type=float, default=0.01)
 
 
     # Logistics
@@ -71,7 +67,7 @@ def cremadrun():
                         help='do not use cuda')
     args = parser.parse_args()
 
-    dataset = 'mosei'
+    dataset = 'cremadv2'
 
 
     def setup_seed(seed):
@@ -93,15 +89,11 @@ def cremadrun():
 
     setup_seed(args.seed)
 
-    mod_map = {"a": 0, "t": 1, "v": 2}
-    
-
     dataloder, orig_dim = getdataloader(dataset, args.batch_size, args.data_path)
     train_loader = dataloder['train']
     test_loader = dataloder['test']
     hyp_params = args
-    hyp_params.mod_id = [mod_map[i] for i in args.mod]
-    hyp_params.orig_dim = [orig_dim[i] for i in hyp_params.mod_id]
+    hyp_params.orig_dim = orig_dim
     hyp_params.layers = args.nlevels
     hyp_params.use_cuda = use_cuda
     hyp_params.dataset = dataset
@@ -109,7 +101,7 @@ def cremadrun():
     hyp_params.n_train, hyp_params.n_test = len(train_loader),  len(test_loader)
     hyp_params.output_dim = 4
     hyp_params.criterion = 'CrossEntropyLoss'
-    hyp_params.num_mod = len(hyp_params.mod_id)
+    hyp_params.num_mod = 2
     test_loss = initiate(hyp_params, train_loader, test_loader)
 
 
