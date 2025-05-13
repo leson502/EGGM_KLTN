@@ -2,7 +2,7 @@ import random
 import torch
 import argparse
 from mosei import *
-from datasets.dataloader import getdataloader
+from dataloader.dataloader import getdataloader
 
 import numpy as np
 
