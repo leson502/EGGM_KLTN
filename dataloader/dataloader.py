@@ -1,12 +1,11 @@
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
-from datasets.CMUDataset import CMUData
-from datasets.IEMODataset import IEMOData
-from datasets.FOODDataset import FoodDataset
-from data.BratsDataset import BraTSData
-from datasets.CREMADDataset import load_cremad
-from datasets.RawCremad import load_cremad as load_cremad2
-from datasets.MoseiDataset import CMUMOSIDataset
+from dataloader.CMUDataset import CMUData
+from dataloader.IEMODataset import IEMOData
+from dataloader.FOODDataset import FoodDataset
+from dataloader.CREMADDataset import load_cremad
+from dataloader.RawCremad import load_cremad as load_cremad2
+from dataloader.MoseiDataset import CMUMOSIDataset
 class opt:
     cvNo = 1
     A_type = "comparE"
@@ -55,19 +54,6 @@ def getdataloader(dataset, batch_size, data_path):
                            batch_size=batch_size,
                            num_workers=8, 
                            shuffle=True if ds == 'train' else False)
-            for ds in data.keys()
-        }
-    elif dataset == 'brats':
-        data = {
-            'train': BraTSData(root=data_path, mode='train'),
-            'valid': BraTSData(root=data_path, mode='valid'),
-            'test': BraTSData(root=data_path, mode='test'),
-        }
-        orig_dim = None
-        dataLoader = {
-            ds: DataLoader(data[ds],
-                           batch_size=batch_size,
-                           num_workers=8)
             for ds in data.keys()
         }
     elif dataset == "cremad":
