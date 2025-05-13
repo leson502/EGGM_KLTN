@@ -41,13 +41,13 @@ def cremadrun():
 
 
     # Tuning
-    parser.add_argument('--batch_size', type=int, default=128, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                         help='batch size')
     parser.add_argument('--clip', type=float, default=0.8,
                         help='gradient clip value')
-    parser.add_argument('--lr', type=float, default=1e-3,
+    parser.add_argument('--lr', type=float, default=1e-5,
                         help='initial learning rate')
-    parser.add_argument('--cls_lr', type=float, default=5e-4,
+    parser.add_argument('--cls_lr', type=float, default=5e-6,
                         help='initial learning rate')
     parser.add_argument('--optim', type=str, default='Adam')
     parser.add_argument('--num_epochs', type=int, default=30)
@@ -67,7 +67,7 @@ def cremadrun():
                         help='do not use cuda')
     args = parser.parse_args()
 
-    dataset = 'cremad'
+    dataset = 'cremadv2'
 
 
     def setup_seed(seed):

@@ -5,7 +5,7 @@ import torch.optim as optim
 import numpy as np
 import time
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from models.cremad import CREMADModel, ClassifierGuided
+from models.cremadv2 import CREMADModel, ClassifierGuided
 from sklearn.metrics import confusion_matrix, classification_report
 from models.moe import cv_squared
 from src.eval_metrics import eval_cls, cal_cos
@@ -18,7 +18,7 @@ def initiate(hyp_params, train_loader, test_loader):
     model = CREMADModel()
 
     if hyp_params.modulation != 'none':
-        classifier = ClassifierGuided(2, 512)
+        classifier = ClassifierGuided(2, 768)
         cls_optimizer = getattr(optim, hyp_params.optim)(classifier.parameters(), lr=hyp_params.cls_lr)
     else:
         classifier, cls_optimizer = None, None
