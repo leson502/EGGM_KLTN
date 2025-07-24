@@ -21,7 +21,6 @@ class CREMADModel(nn.Module):
     def forward(self, audio, visual):
         a = self.encoder_0(audio).pooler_output
         v = self.encoder_1(visual).pooler_output
-
         
         out_a, gates_a, load_a = self.classifier(a, 0)
         out_v, gates_v, load_v = self.classifier(v, 1)
